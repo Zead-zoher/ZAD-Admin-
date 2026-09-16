@@ -1,0 +1,6 @@
+{
+  "name": "Omni Zad Admin Panel",
+  "description": "لوحة تحكم الأدمن السرية والمستقلة لإدارة مستخدمي منصة Omni Zad مع شاشة تمويه 404 ونظام ربط تيليجرام",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
