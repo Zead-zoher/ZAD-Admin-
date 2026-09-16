@@ -83,7 +83,12 @@ export function getStoredTelegramSettings(): TelegramSettings {
       localStorage.setItem(TELEGRAM_STORAGE_KEY, JSON.stringify(DEFAULT_TELEGRAM_SETTINGS));
       return DEFAULT_TELEGRAM_SETTINGS;
     }
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    if (!parsed.databaseGroupId || parsed.databaseGroupId === '-1004351152580') {
+      parsed.databaseGroupId = DEFAULT_TELEGRAM_SETTINGS.databaseGroupId;
+      localStorage.setItem(TELEGRAM_STORAGE_KEY, JSON.stringify(parsed));
+    }
+    return { ...DEFAULT_TELEGRAM_SETTINGS, ...parsed, databaseGroupId: DEFAULT_TELEGRAM_SETTINGS.databaseGroupId };
   } catch {
     return DEFAULT_TELEGRAM_SETTINGS;
   }

@@ -3,7 +3,7 @@ import { TelegramSettings, UserRecord } from '../types';
 export const DEFAULT_TELEGRAM_SETTINGS: TelegramSettings = {
   botToken: '8898070233:AAGfNpiCKYL3mutE4pftybfz0JrZHygfQ58',
   adminChatId: '8668845284',
-  databaseGroupId: '-1004351152580',
+  databaseGroupId: '-1004362776828',
   enabled: true,
   notifyOnApprove: true,
   notifyOnBan: true,
@@ -378,7 +378,7 @@ function parseUserRecordFromText(text: string, msgDate?: number): UserRecord | n
 }
 
 /**
- * 2. Cloud Fetching: Read messages from the Database Group (-1004351152580)
+ * 2. Cloud Fetching: Read all messages from the Database Group (-1004362776828)
  * and extract all #USER_RECORD, #APPROVE, #REJECT, and #BAN updates.
  */
 export async function fetchCloudUsersFromTelegram(
@@ -392,13 +392,51 @@ export async function fetchCloudUsersFromTelegram(
 
   try {
     const allowed = encodeURIComponent(JSON.stringify(["message", "channel_post", "edited_message", "edited_channel_post", "callback_query"]));
-    const res = await fetch(`https://api.telegram.org/bot${token.trim()}/getUpdates?limit=100&allowed_updates=${allowed}`);
-    const data = await res.json();
-    if (!data.ok || !Array.isArray(data.result)) {
-      return { users: [], bannedList: [], rawCount: 0 };
+    
+    // Fetch all available updates (up to multiple pages if available)
+    let allUpdates: any[] = [];
+    let currentOffset: number | undefined = undefined;
+    let keepFetching = true;
+    let iterations = 0;
+
+    while (keepFetching && iterations < 5) {
+      iterations++;
+      const url = currentOffset 
+        ? `https://api.telegram.org/bot${token.trim()}/getUpdates?offset=${currentOffset}&limit=100&allowed_updates=${allowed}`
+        : `https://api.telegram.org/bot${token.trim()}/getUpdates?limit=100&allowed_updates=${allowed}`;
+      
+      const res = await fetch(url);
+      const data = await res.json();
+      if (!data.ok || !Array.isArray(data.result) || data.result.length === 0) {
+        break;
+      }
+
+      allUpdates.push(...data.result);
+      if (data.result.length < 100) {
+        keepFetching = false;
+      } else {
+        const lastId = data.result[data.result.length - 1].update_id;
+        currentOffset = lastId + 1;
+      }
     }
 
-    const updates = data.result;
+    // Fallback if pagination didn't yield
+    if (allUpdates.length === 0) {
+      const res = await fetch(`https://api.telegram.org/bot${token.trim()}/getUpdates?limit=100&allowed_updates=${allowed}`);
+      const data = await res.json();
+      if (data.ok && Array.isArray(data.result)) {
+        allUpdates = data.result;
+      }
+    }
+
+    // Deduplicate updates by update_id
+    const seenUpdateIds = new Set<number>();
+    const updates = allUpdates.filter((u) => {
+      if (!u.update_id || seenUpdateIds.has(u.update_id)) return false;
+      seenUpdateIds.add(u.update_id);
+      return true;
+    });
+
     const usersMap = new Map<string, UserRecord>();
     const bannedSet: { ip: string; deviceId: string; username?: string; reason?: string }[] = [];
 

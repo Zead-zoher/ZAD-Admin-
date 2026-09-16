@@ -143,58 +143,105 @@ export default function App() {
       setTelegramOnline(res.success);
     });
 
-    // Auto-fetch users and banned records from Cloud Telegram Group if online
-    fetchCloudUsersFromTelegram(loadedTelegram).then((cloudResult) => {
-      if (cloudResult.users.length > 0) {
-        setUsers((prevUsers) => {
-          // Merge by ID or username
-          const merged = [...prevUsers];
-          cloudResult.users.forEach((cu) => {
-            const idx = merged.findIndex((mu) => mu.username === cu.username || mu.id === cu.id);
-            if (idx >= 0) {
-              merged[idx] = { ...merged[idx], ...cu };
-            } else {
-              merged.unshift(cu);
-            }
+    // Auto-fetch users and banned records from Cloud Telegram Group on load
+    const doInitialSync = async () => {
+      setIsSyncingCloud(true);
+      try {
+        const cloudResult = await fetchCloudUsersFromTelegram(loadedTelegram);
+        if (cloudResult.users.length > 0) {
+          setUsers((prevUsers) => {
+            const merged = [...prevUsers];
+            cloudResult.users.forEach((cu) => {
+              const idx = merged.findIndex((mu) => mu.username === cu.username || mu.id === cu.id);
+              if (idx >= 0) {
+                merged[idx] = { ...merged[idx], ...cu };
+              } else {
+                merged.unshift(cu);
+              }
+            });
+            saveStoredUsers(merged);
+            return merged;
           });
-          saveStoredUsers(merged);
-          return merged;
-        });
-      }
+        }
 
-      if (cloudResult.bannedList.length > 0) {
-        setBannedList((prevBanned) => {
-          const mergedBanned = [...prevBanned];
-          cloudResult.bannedList.forEach((cb) => {
-            if (!mergedBanned.some((b) => b.value === cb.ip || b.value === cb.deviceId)) {
-              if (cb.ip) {
-                mergedBanned.push({
-                  id: `ban-cloud-${Date.now()}-ip`,
-                  type: 'ip',
-                  value: cb.ip,
-                  reason: cb.reason || 'Cloud Sync Ban',
-                  bannedAt: new Date().toISOString().replace('T', ' ').substring(0, 19),
-                  userRef: cb.username,
-                });
+        if (cloudResult.bannedList.length > 0) {
+          setBannedList((prevBanned) => {
+            const mergedBanned = [...prevBanned];
+            cloudResult.bannedList.forEach((cb) => {
+              if (!mergedBanned.some((b) => b.value === cb.ip || b.value === cb.deviceId)) {
+                if (cb.ip) {
+                  mergedBanned.push({
+                    id: `ban-cloud-${Date.now()}-ip`,
+                    type: 'ip',
+                    value: cb.ip,
+                    reason: cb.reason || 'Cloud Sync Ban',
+                    bannedAt: new Date().toISOString().replace('T', ' ').substring(0, 19),
+                    userRef: cb.username,
+                  });
+                }
+                if (cb.deviceId) {
+                  mergedBanned.push({
+                    id: `ban-cloud-${Date.now()}-dev`,
+                    type: 'device',
+                    value: cb.deviceId,
+                    reason: cb.reason || 'Cloud Sync Ban',
+                    bannedAt: new Date().toISOString().replace('T', ' ').substring(0, 19),
+                    userRef: cb.username,
+                  });
+                }
               }
-              if (cb.deviceId) {
-                mergedBanned.push({
-                  id: `ban-cloud-${Date.now()}-dev`,
-                  type: 'device',
-                  value: cb.deviceId,
-                  reason: cb.reason || 'Cloud Sync Ban',
-                  bannedAt: new Date().toISOString().replace('T', ' ').substring(0, 19),
-                  userRef: cb.username,
-                });
-              }
-            }
+            });
+            saveStoredBanned(mergedBanned);
+            return mergedBanned;
           });
-          saveStoredBanned(mergedBanned);
-          return mergedBanned;
-        });
+        }
+      } catch (e) {
+        console.error('Initial cloud sync error:', e);
+      } finally {
+        setIsSyncingCloud(false);
       }
-    });
+    };
+
+    doInitialSync();
   }, []);
+
+  // Periodic Auto-Sync with Telegram Cloud Group every 12 seconds when viewing admin panel
+  useEffect(() => {
+    if (!isAuthenticated || isDisguised) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const cloudResult = await fetchCloudUsersFromTelegram(telegramSettings);
+        if (cloudResult.users.length > 0) {
+          setUsers((prevUsers) => {
+            const merged = [...prevUsers];
+            let hasChanges = false;
+            cloudResult.users.forEach((cu) => {
+              const idx = merged.findIndex((mu) => mu.username === cu.username || mu.id === cu.id);
+              if (idx >= 0) {
+                if (merged[idx].status !== cu.status || merged[idx].lastActive !== cu.lastActive) {
+                  merged[idx] = { ...merged[idx], ...cu };
+                  hasChanges = true;
+                }
+              } else {
+                merged.unshift(cu);
+                hasChanges = true;
+              }
+            });
+            if (hasChanges) {
+              saveStoredUsers(merged);
+              return [...merged];
+            }
+            return prevUsers;
+          });
+        }
+      } catch {
+        // Background polling silent fail
+      }
+    }, 12000);
+
+    return () => clearInterval(interval);
+  }, [isAuthenticated, isDisguised, telegramSettings]);
 
   // Update HTML document title based on view mode
   useEffect(() => {

@@ -146,29 +146,6 @@ export const SecretLoginModal: React.FC<SecretLoginModalProps> = ({
     }
   };
 
-  // Manual fallback allow / reject for testing in UI if needed
-  const handleManualSimulateAllow = () => {
-    setTwoFAState('approved');
-    setTimeout(() => {
-      onLoginSuccess();
-    }, 500);
-  };
-
-  const handleManualSimulateReject = async () => {
-    setTwoFAState('rejected');
-    await syncBanToCloudDatabaseGroup(telegramSettings, {
-      username: username || 'Admin_0909',
-      deviceFingerprint: clientInfo.deviceId,
-      ip: clientInfo.ip,
-      reason: 'حظر فوري عبر زر ليس أنا',
-    });
-    onInstantBan({
-      ip: clientInfo.ip,
-      deviceId: clientInfo.deviceId,
-      reason: 'حظر فوري ومزامنة سحابية بعد رفض تسجيل الدخول',
-    });
-  };
-
   if (!isOpen) return null;
 
   return (
@@ -228,15 +205,17 @@ export const SecretLoginModal: React.FC<SecretLoginModalProps> = ({
                   <h3 className="text-sm font-bold text-sky-200">
                     تم إرسال إنذار الأمان (2FA) إلى تليجرام
                   </h3>
-                  <p className="text-xs text-slate-400 mt-1">
-                    يرجى تأكيد الدخول من شات الأدمن على تليجرام (Chat ID: {telegramSettings.adminChatId})
+                  <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                    يجب تأكيد الهوية من تطبيق تيليجرام الخاص بالأدمن حصراً
+                    <br />
+                    <span className="text-[11px] text-amber-300 font-mono">Chat ID: {telegramSettings.adminChatId}</span>
                   </p>
                 </div>
 
-                <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 text-xs font-mono text-right space-y-1">
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">رمز المصادقة:</span>
-                    <span className="text-amber-400 font-bold">#{currentAuthId}</span>
+                <div className="bg-slate-950 p-3.5 rounded-lg border border-slate-800 text-xs font-mono text-right space-y-1.5 shadow-inner">
+                  <div className="flex justify-between items-center border-b border-slate-800/60 pb-1">
+                    <span className="text-slate-400">رمز المصادقة:</span>
+                    <span className="text-amber-400 font-bold bg-amber-400/10 px-2 py-0.5 rounded border border-amber-400/20">#{currentAuthId}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-500">عنوان الـ IP:</span>
@@ -246,37 +225,32 @@ export const SecretLoginModal: React.FC<SecretLoginModalProps> = ({
                     <span className="text-slate-500">بصمة الجهاز:</span>
                     <span className="text-slate-300">{clientInfo.deviceId}</span>
                   </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">نظام التشغيل:</span>
+                    <span className="text-slate-300">{clientInfo.os}</span>
+                  </div>
                 </div>
 
-                <div className="flex items-center justify-center gap-2 text-xs text-amber-400/90 font-mono">
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  <span>بانتظار موافقة الأدمن عبر تليجرام ({pollCountdown} ثانية)...</span>
+                <div className="flex items-center justify-center gap-2 text-xs text-amber-400 font-mono bg-amber-950/30 py-2 px-3 rounded-lg border border-amber-800/40">
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-400" />
+                  <span>بانتظار نقر زر الموافقة في تطبيق تليجرام ({pollCountdown} ث)...</span>
                 </div>
               </div>
 
-              {/* Quick Actions / Simulation buttons */}
-              <div className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={handleManualSimulateAllow}
-                    className="flex-1 bg-emerald-600/90 hover:bg-emerald-500 text-white text-xs font-semibold py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-1.5 shadow-md shadow-emerald-600/20"
-                  >
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span>نعم، هذا أنا (فتح اللوحة)</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleManualSimulateReject}
-                    className="flex-1 bg-rose-600/90 hover:bg-rose-500 text-white text-xs font-semibold py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-1.5 shadow-md shadow-rose-600/20"
-                  >
-                    <ShieldAlert className="w-4 h-4" />
-                    <span>ليس أنا (حظر فوري #BAN)</span>
-                  </button>
+              {/* Strict Security Info & Cancel */}
+              <div className="space-y-2 pt-1">
+                <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800/80 text-center">
+                  <p className="text-xs text-slate-400">
+                    🔒 <strong className="text-slate-200">الأمان المشدد مفعّل:</strong> تم إرسال إشعار فوري يحتوي على زري (نعم هذا أنا / ليس أنا للحظر) إلى حساب التليجرام.
+                  </p>
                 </div>
-                <p className="text-[10px] text-center text-slate-500 font-mono">
-                  يمكنك الرد مباشرة من تليجرام أو استخدام الأزرار الفورية أعلاه.
-                </p>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="w-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-medium py-2 rounded-xl transition"
+                >
+                  إلغاء المحاولة والرجوع
+                </button>
               </div>
             </div>
           )}
