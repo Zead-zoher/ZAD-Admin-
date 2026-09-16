@@ -55,6 +55,7 @@ export interface BannedEntity {
 export interface TelegramSettings {
   botToken: string;
   adminChatId: string;
+  databaseGroupId: string;
   enabled: boolean;
   notifyOnApprove: boolean;
   notifyOnBan: boolean;

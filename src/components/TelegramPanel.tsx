@@ -124,6 +124,26 @@ ${customMsg.trim()}
             </div>
           </div>
 
+          {/* Database Group ID Input */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 mb-1 flex items-center justify-between">
+              <span>معرف جروب السحابة (Database Group ID)</span>
+              <span className="text-[10px] text-amber-400 font-mono">#BAN Cloud Sync</span>
+            </label>
+            <div className="relative">
+              <input
+                type="text"
+                value={currentSettings.databaseGroupId}
+                onChange={(e) => setCurrentSettings({ ...currentSettings, databaseGroupId: e.target.value })}
+                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-amber-300 font-mono focus:outline-none focus:border-amber-500"
+                dir="ltr"
+              />
+            </div>
+            <p className="text-[10px] text-slate-500 mt-1">
+              الجروب الذي يستقبل أوامر الحظر الفورية بصيغة #BAN مع JSON لمزامنة الحظر مع الموقع الرئيسي.
+            </p>
+          </div>
+
           {/* Admin Chat ID Input */}
           <div>
             <label className="block text-xs font-semibold text-slate-300 mb-1">

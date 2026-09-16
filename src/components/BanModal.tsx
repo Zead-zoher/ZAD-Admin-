@@ -96,9 +96,9 @@ export const BanModal: React.FC<BanModalProps> = ({
               />
               <span>إدراج الـ IP وبصمة الجهاز في القائمة السوداء الفورية</span>
             </label>
-            <p className="text-[11px] text-slate-500 pr-6">
-              سيتم منع أي جهاز يحمل هذا الـ IP أو البصمة من الوصول للموقع نهائياً وإظهار شاشة الحظر.
-            </p>
+            <div className="flex items-center gap-1.5 text-[11px] text-amber-400/90 font-mono pr-6">
+              <span>⚡ سيتم إرسال أمر #BAN مع بيانات الـ JSON إلى جروب السحابة فوراً.</span>
+            </div>
           </div>
 
           <div className="flex justify-end gap-2 pt-2">

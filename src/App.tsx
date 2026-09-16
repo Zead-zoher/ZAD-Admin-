@@ -29,6 +29,7 @@ import {
   sendUserApprovedAlert,
   sendUserBannedAlert,
   sendAdminLoginAlert,
+  syncBanToCloudDatabaseGroup,
 } from './services/telegram';
 import { getClientDeviceInfo, getClientPublicIP } from './services/deviceInfo';
 import { AccessLog, AdminStats, BannedEntity, TelegramSettings, UserRecord } from './types';
@@ -391,7 +392,7 @@ export default function App() {
   };
 
   // Banned Entities Operations
-  const handleAddManualBan = (entity: Omit<BannedEntity, 'id' | 'bannedAt'>) => {
+  const handleAddManualBan = async (entity: Omit<BannedEntity, 'id' | 'bannedAt'>) => {
     const newEntry: BannedEntity = {
       ...entity,
       id: `ban-${Date.now()}`,
@@ -412,6 +413,14 @@ export default function App() {
       status: 'danger',
     });
     setLogs(getStoredLogs());
+
+    // Sync Ban to Telegram Cloud Group
+    await syncBanToCloudDatabaseGroup(telegramSettings, {
+      username: entity.type === 'username' ? entity.value : 'Manual Ban',
+      deviceFingerprint: entity.type === 'device' ? entity.value : clientInfo.deviceId,
+      ip: entity.type === 'ip' ? entity.value : clientInfo.ip,
+      reason: entity.reason,
+    });
   };
 
   const handleRemoveBannedEntity = (id: string) => {
@@ -469,19 +478,74 @@ export default function App() {
     return <BannedScreen ip={bannedInfo.ip} deviceId={bannedInfo.deviceId} reason={bannedInfo.reason} />;
   }
 
-  // 1. If Disguised or Not Logged In -> Show Fake Error 404 Screen
-  if (isDisguised || !isAuthenticated) {
-    return (
-      <>
-        <FakeErrorScreen onSecretTriggered={handleSecretTriggered} />
-        <SecretLoginModal
-          isOpen={isLoginModalOpen}
-          onClose={() => setIsLoginModalOpen(false)}
-          onLoginSuccess={handleLoginSuccess}
-        />
-      </>
-    );
-  }
+    // Instant Ban from 2FA Security rejection
+    const handleInstantBanFrom2FA = (info: { ip: string; deviceId: string; reason: string }) => {
+      const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
+      const newBannedEntries: BannedEntity[] = [...bannedList];
+      
+      if (!newBannedEntries.some((b) => b.type === 'ip' && b.value === info.ip)) {
+        newBannedEntries.push({
+          id: `ban-${Date.now()}-ip`,
+          type: 'ip',
+          value: info.ip,
+          reason: info.reason,
+          bannedAt: now,
+          userRef: 'Intruder_2FA',
+        });
+      }
+
+      if (!newBannedEntries.some((b) => b.type === 'device' && b.value === info.deviceId)) {
+        newBannedEntries.push({
+          id: `ban-${Date.now()}-dev`,
+          type: 'device',
+          value: info.deviceId,
+          reason: info.reason,
+          bannedAt: now,
+          userRef: 'Intruder_2FA',
+        });
+      }
+
+      setBannedList(newBannedEntries);
+      saveStoredBanned(newBannedEntries);
+
+      addAccessLog({
+        ip: info.ip,
+        location: clientInfo.location,
+        device: 'Admin Gate 2FA',
+        os: clientInfo.os,
+        deviceId: info.deviceId,
+        eventType: 'ban_trigger',
+        details: `حظر أمني فوري ومزامنة سحابية بعد رفض مصادقة الـ 2FA`,
+        status: 'danger',
+      });
+      setLogs(getStoredLogs());
+
+      // Lock visitor immediately
+      setIsBannedVisitor(true);
+      setBannedInfo({
+        ip: info.ip,
+        deviceId: info.deviceId,
+        reason: info.reason,
+      });
+      setIsLoginModalOpen(false);
+    };
+
+    // 1. If Disguised or Not Logged In -> Show Fake Error 404 Screen
+    if (isDisguised || !isAuthenticated) {
+      return (
+        <>
+          <FakeErrorScreen onSecretTriggered={handleSecretTriggered} />
+          <SecretLoginModal
+            isOpen={isLoginModalOpen}
+            onClose={() => setIsLoginModalOpen(false)}
+            onLoginSuccess={handleLoginSuccess}
+            onInstantBan={handleInstantBanFrom2FA}
+            clientInfo={clientInfo}
+            telegramSettings={telegramSettings}
+          />
+        </>
+      );
+    }
 
   // 2. Main Authenticated Admin Control Panel (Omni Zad)
   return (
