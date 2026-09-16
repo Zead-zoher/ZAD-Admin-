@@ -94,18 +94,19 @@ export function saveStoredTelegramSettings(settings: TelegramSettings): void {
 }
 
 export function getAdminAuthSession(): boolean {
-  try {
-    return localStorage.getItem(AUTH_SESSION_KEY) === 'authenticated_0909';
-  } catch {
-    return false;
-  }
+  // Always return false so the admin must authenticate every single session
+  return false;
 }
 
 export function setAdminAuthSession(auth: boolean): void {
-  if (auth) {
-    localStorage.setItem(AUTH_SESSION_KEY, 'authenticated_0909');
-  } else {
-    localStorage.removeItem(AUTH_SESSION_KEY);
+  try {
+    sessionStorage.setItem(AUTH_SESSION_KEY, auth ? 'authenticated_0909' : '');
+    if (!auth) {
+      localStorage.removeItem(AUTH_SESSION_KEY);
+      sessionStorage.removeItem(AUTH_SESSION_KEY);
+    }
+  } catch {
+    // Ignore storage issues
   }
 }
 

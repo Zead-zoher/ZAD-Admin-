@@ -30,6 +30,9 @@ import {
   sendUserBannedAlert,
   sendAdminLoginAlert,
   syncBanToCloudDatabaseGroup,
+  sendUserApprovalToCloud,
+  sendUserRejectionToCloud,
+  fetchCloudUsersFromTelegram,
 } from './services/telegram';
 import { getClientDeviceInfo, getClientPublicIP } from './services/deviceInfo';
 import { AccessLog, AdminStats, BannedEntity, TelegramSettings, UserRecord } from './types';
@@ -41,6 +44,7 @@ export default function App() {
   const [isDisguised, setIsDisguised] = useState<boolean>(true);
   const [isLoginModalOpen, setIsLoginModalOpen] = useState<boolean>(false);
   const [isBannedVisitor, setIsBannedVisitor] = useState<boolean>(false);
+  const [isSyncingCloud, setIsSyncingCloud] = useState<boolean>(false);
   const [bannedInfo, setBannedInfo] = useState<{ ip: string; deviceId: string; reason?: string }>({
     ip: '',
     deviceId: '',
@@ -55,7 +59,7 @@ export default function App() {
 
   // Tab & Filters
   const [currentTab, setCurrentTab] = useState<'users' | 'logs' | 'banned'>('users');
-  const [selectedFilter, setSelectedFilter] = useState<'all' | 'pending' | 'active' | 'banned'>('all');
+  const [selectedFilter, setSelectedFilter] = useState<'all' | 'pending' | 'active' | 'rejected' | 'banned'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   // Modals
@@ -138,6 +142,58 @@ export default function App() {
     testTelegramBot(loadedTelegram.botToken).then((res) => {
       setTelegramOnline(res.success);
     });
+
+    // Auto-fetch users and banned records from Cloud Telegram Group if online
+    fetchCloudUsersFromTelegram(loadedTelegram).then((cloudResult) => {
+      if (cloudResult.users.length > 0) {
+        setUsers((prevUsers) => {
+          // Merge by ID or username
+          const merged = [...prevUsers];
+          cloudResult.users.forEach((cu) => {
+            const idx = merged.findIndex((mu) => mu.username === cu.username || mu.id === cu.id);
+            if (idx >= 0) {
+              merged[idx] = { ...merged[idx], ...cu };
+            } else {
+              merged.unshift(cu);
+            }
+          });
+          saveStoredUsers(merged);
+          return merged;
+        });
+      }
+
+      if (cloudResult.bannedList.length > 0) {
+        setBannedList((prevBanned) => {
+          const mergedBanned = [...prevBanned];
+          cloudResult.bannedList.forEach((cb) => {
+            if (!mergedBanned.some((b) => b.value === cb.ip || b.value === cb.deviceId)) {
+              if (cb.ip) {
+                mergedBanned.push({
+                  id: `ban-cloud-${Date.now()}-ip`,
+                  type: 'ip',
+                  value: cb.ip,
+                  reason: cb.reason || 'Cloud Sync Ban',
+                  bannedAt: new Date().toISOString().replace('T', ' ').substring(0, 19),
+                  userRef: cb.username,
+                });
+              }
+              if (cb.deviceId) {
+                mergedBanned.push({
+                  id: `ban-cloud-${Date.now()}-dev`,
+                  type: 'device',
+                  value: cb.deviceId,
+                  reason: cb.reason || 'Cloud Sync Ban',
+                  bannedAt: new Date().toISOString().replace('T', ' ').substring(0, 19),
+                  userRef: cb.username,
+                });
+              }
+            }
+          });
+          saveStoredBanned(mergedBanned);
+          return mergedBanned;
+        });
+      }
+    });
   }, []);
 
   // Update HTML document title based on view mode
@@ -196,6 +252,77 @@ export default function App() {
     setIsDisguised(true);
   };
 
+  // User Actions: ☁️ Manual Cloud Sync
+  const handleSyncCloud = async () => {
+    setIsSyncingCloud(true);
+    try {
+      const cloudResult = await fetchCloudUsersFromTelegram(telegramSettings);
+      if (cloudResult.users.length > 0) {
+        setUsers((prevUsers) => {
+          const merged = [...prevUsers];
+          cloudResult.users.forEach((cu) => {
+            const idx = merged.findIndex((mu) => mu.username === cu.username || mu.id === cu.id);
+            if (idx >= 0) {
+              merged[idx] = { ...merged[idx], ...cu };
+            } else {
+              merged.unshift(cu);
+            }
+          });
+          saveStoredUsers(merged);
+          return merged;
+        });
+      }
+
+      if (cloudResult.bannedList.length > 0) {
+        setBannedList((prevBanned) => {
+          const mergedBanned = [...prevBanned];
+          cloudResult.bannedList.forEach((cb) => {
+            if (!mergedBanned.some((b) => b.value === cb.ip || b.value === cb.deviceId)) {
+              if (cb.ip) {
+                mergedBanned.push({
+                  id: `ban-cloud-${Date.now()}-ip`,
+                  type: 'ip',
+                  value: cb.ip,
+                  reason: cb.reason || 'Cloud Sync Ban',
+                  bannedAt: new Date().toISOString().replace('T', ' ').substring(0, 19),
+                  userRef: cb.username,
+                });
+              }
+              if (cb.deviceId) {
+                mergedBanned.push({
+                  id: `ban-cloud-${Date.now()}-dev`,
+                  type: 'device',
+                  value: cb.deviceId,
+                  reason: cb.reason || 'Cloud Sync Ban',
+                  bannedAt: new Date().toISOString().replace('T', ' ').substring(0, 19),
+                  userRef: cb.username,
+                });
+              }
+            }
+          });
+          saveStoredBanned(mergedBanned);
+          return mergedBanned;
+        });
+      }
+      
+      addAccessLog({
+        ip: clientInfo.ip,
+        location: clientInfo.location,
+        device: 'Admin Console',
+        os: clientInfo.os,
+        deviceId: clientInfo.deviceId,
+        eventType: 'admin_action',
+        details: `تمت مزامنة السحابة بنجاح وجلب ${cloudResult.users.length} سجل مستخدمين و ${cloudResult.bannedList.length} حظر من تليجرام`,
+        status: 'success',
+      });
+      setLogs(getStoredLogs());
+    } catch (e) {
+      console.error('Failed to sync cloud users:', e);
+    } finally {
+      setIsSyncingCloud(false);
+    }
+  };
+
   // User Actions: 🟢 Approve
   const handleApproveUser = async (user: UserRecord) => {
     const updated = users.map((u) => (u.id === user.id ? { ...u, status: 'active' as const } : u));
@@ -210,14 +337,39 @@ export default function App() {
       os: user.os,
       deviceId: user.deviceId,
       eventType: 'status_change',
-      details: `تم تفعيل حساب المستخدم ${user.displayName} (@${user.username})`,
+      details: `تم تفعيل وقبول حساب المستخدم ${user.displayName} (@${user.username})`,
       status: 'success',
       userRef: user.username,
     });
     setLogs(getStoredLogs());
 
-    // Telegram Notification
+    // Telegram Cloud Sync & Notification
+    await sendUserApprovalToCloud(telegramSettings, { ...user, status: 'active' });
     await sendUserApprovedAlert(telegramSettings, { ...user, status: 'active' });
+  };
+
+  // User Actions: 🟠 Reject
+  const handleRejectUser = async (user: UserRecord) => {
+    const updated = users.map((u) => (u.id === user.id ? { ...u, status: 'rejected' as const } : u));
+    setUsers(updated);
+    saveStoredUsers(updated);
+
+    // Add Log
+    addAccessLog({
+      ip: user.ip,
+      location: user.location,
+      device: user.browser,
+      os: user.os,
+      deviceId: user.deviceId,
+      eventType: 'status_change',
+      details: `تم رفض طلب حساب المستخدم ${user.displayName} (@${user.username})`,
+      status: 'warning',
+      userRef: user.username,
+    });
+    setLogs(getStoredLogs());
+
+    // Telegram Cloud Sync
+    await sendUserRejectionToCloud(telegramSettings, { ...user, status: 'rejected' });
   };
 
   // User Actions: 🔴 Ban IP & Device
@@ -468,6 +620,7 @@ export default function App() {
     totalUsers: users.length,
     pendingUsers: users.filter((u) => u.status === 'pending').length,
     activeUsers: users.filter((u) => u.status === 'active').length,
+    rejectedUsers: users.filter((u) => u.status === 'rejected').length,
     bannedUsers: users.filter((u) => u.status === 'banned').length,
     totalLogsToday: logs.length,
     bannedIPsCount: bannedList.length,
@@ -653,10 +806,13 @@ export default function App() {
           <UsersTable
             users={users}
             onApprove={handleApproveUser}
+            onReject={handleRejectUser}
             onBan={handleTriggerBanModal}
             onUnban={handleUnbanUser}
             onDelete={handleDeleteUser}
             onEdit={handleOpenEdit}
+            onSyncCloud={handleSyncCloud}
+            isSyncing={isSyncingCloud}
             selectedFilter={selectedFilter}
             onFilterChange={setSelectedFilter}
             searchQuery={searchQuery}

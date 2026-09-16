@@ -1,63 +1,63 @@
 import React from 'react';
-import { Users, Clock, CheckCircle2, ShieldBan, Activity, Laptop } from 'lucide-react';
+import { Users, Clock, CheckCircle2, ShieldBan, XCircle } from 'lucide-react';
 import { AdminStats } from '../types';
 
 interface StatsCardsProps {
   stats: AdminStats;
   selectedFilter: string;
-  onSelectFilter: (filter: 'all' | 'pending' | 'active' | 'banned') => void;
+  onSelectFilter: (filter: 'all' | 'pending' | 'active' | 'rejected' | 'banned') => void;
 }
 
 export const StatsCards: React.FC<StatsCardsProps> = ({ stats, selectedFilter, onSelectFilter }) => {
   const cards = [
     {
-      id: 'all' as const,
-      label: 'إجمالي المستخدمين',
-      sublabel: 'Total Users',
-      value: stats.totalUsers,
-      icon: Users,
-      color: 'text-indigo-400',
-      bg: 'bg-indigo-500/10',
-      border: 'border-indigo-500/20',
-      activeBorder: 'border-indigo-500 ring-2 ring-indigo-500/30',
-      badge: `${stats.totalUsers} حساب مسجل`,
-    },
-    {
       id: 'pending' as const,
-      label: 'الحسابات المعلقة',
-      sublabel: 'Pending Approval',
+      label: 'طلبات قيد الانتظار',
+      sublabel: 'Pending Requests',
       value: stats.pendingUsers,
       icon: Clock,
       color: 'text-amber-400',
       bg: 'bg-amber-500/10',
       border: 'border-amber-500/20',
-      activeBorder: 'border-amber-500 ring-2 ring-amber-500/30',
-      badge: stats.pendingUsers > 0 ? 'يتطلب إجراء الأدمن ⚡' : 'لا توجد طلبات معلقة',
+      activeBorder: 'border-amber-500 ring-2 ring-amber-500/40 bg-amber-950/20',
+      badge: stats.pendingUsers > 0 ? `${stats.pendingUsers} بانتظار قرارك ⚡` : 'لا توجد طلبات معلقة',
       alert: stats.pendingUsers > 0,
     },
     {
       id: 'active' as const,
-      label: 'الحسابات النشطة',
-      sublabel: 'Active Users',
+      label: 'المستخدمين المقبولين النشطين',
+      sublabel: 'Active Accounts',
       value: stats.activeUsers,
       icon: CheckCircle2,
       color: 'text-emerald-400',
       bg: 'bg-emerald-500/10',
       border: 'border-emerald-500/20',
-      activeBorder: 'border-emerald-500 ring-2 ring-emerald-500/30',
-      badge: 'مفعل ومسموح بالدخول',
+      activeBorder: 'border-emerald-500 ring-2 ring-emerald-500/40 bg-emerald-950/20',
+      badge: `${stats.activeUsers} حساب مفعل بالكامل`,
+    },
+    {
+      id: 'rejected' as const,
+      label: 'المستخدمين المرفوضين',
+      sublabel: 'Rejected Users',
+      value: stats.rejectedUsers,
+      icon: XCircle,
+      color: 'text-orange-400',
+      bg: 'bg-orange-500/10',
+      border: 'border-orange-500/20',
+      activeBorder: 'border-orange-500 ring-2 ring-orange-500/40 bg-orange-950/20',
+      badge: `${stats.rejectedUsers} طلب مرفوض (غير مقبول)`,
     },
     {
       id: 'banned' as const,
-      label: 'الحظر والأجهزة المحظورة',
-      sublabel: 'Banned Accounts & IPs',
+      label: 'المحظورين والقائمة السوداء',
+      sublabel: 'Banned & Blacklist',
       value: stats.bannedUsers,
       icon: ShieldBan,
       color: 'text-rose-400',
       bg: 'bg-rose-500/10',
       border: 'border-rose-500/20',
-      activeBorder: 'border-rose-500 ring-2 ring-rose-500/30',
-      badge: `${stats.bannedIPsCount} عناوين IP و بصمات محظورة`,
+      activeBorder: 'border-rose-500 ring-2 ring-rose-500/40 bg-rose-950/20',
+      badge: `${stats.bannedIPsCount} عناوين IP وبصمات محظورة`,
     },
   ];
 
@@ -80,7 +80,7 @@ export const StatsCards: React.FC<StatsCardsProps> = ({ stats, selectedFilter, o
 
             <div className="flex items-start justify-between">
               <div>
-                <span className="text-xs font-medium text-slate-400 block mb-1">
+                <span className="text-xs font-semibold text-slate-300 block mb-1">
                   {card.label}
                 </span>
                 <div className="text-3xl font-extrabold text-slate-100 font-mono tracking-tight">
@@ -93,7 +93,7 @@ export const StatsCards: React.FC<StatsCardsProps> = ({ stats, selectedFilter, o
             </div>
 
             <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs">
-              <span className="text-slate-500 font-mono">{card.sublabel}</span>
+              <span className="text-slate-500 font-mono text-[11px]">{card.sublabel}</span>
               <span
                 className={`text-[11px] font-medium px-2 py-0.5 rounded-md ${
                   card.alert

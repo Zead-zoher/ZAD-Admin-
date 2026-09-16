@@ -15,6 +15,7 @@ import {
   ShieldBan,
   UserCheck,
   UserX,
+  XCircle,
   Filter,
   Download,
   Terminal,
@@ -25,12 +26,15 @@ import { UserRecord, UserStatus } from '../types';
 interface UsersTableProps {
   users: UserRecord[];
   onApprove: (user: UserRecord) => void;
+  onReject: (user: UserRecord) => void;
   onBan: (user: UserRecord) => void;
   onUnban: (user: UserRecord) => void;
   onDelete: (user: UserRecord) => void;
   onEdit: (user: UserRecord) => void;
-  selectedFilter: 'all' | 'pending' | 'active' | 'banned';
-  onFilterChange: (filter: 'all' | 'pending' | 'active' | 'banned') => void;
+  onSyncCloud?: () => void;
+  isSyncing?: boolean;
+  selectedFilter: 'all' | 'pending' | 'active' | 'rejected' | 'banned';
+  onFilterChange: (filter: 'all' | 'pending' | 'active' | 'rejected' | 'banned') => void;
   searchQuery: string;
   onSearchChange: (query: string) => void;
 }
@@ -38,10 +42,13 @@ interface UsersTableProps {
 export const UsersTable: React.FC<UsersTableProps> = ({
   users,
   onApprove,
+  onReject,
   onBan,
   onUnban,
   onDelete,
   onEdit,
+  onSyncCloud,
+  isSyncing = false,
   selectedFilter,
   onFilterChange,
   searchQuery,
@@ -127,7 +134,7 @@ export const UsersTable: React.FC<UsersTableProps> = ({
         </div>
 
         {/* Status Filter Tabs & CSV Export */}
-        <div className="flex items-center gap-2 w-full md:w-auto justify-between md:justify-end overflow-x-auto pb-1 md:pb-0">
+        <div className="flex items-center gap-2 w-full lg:w-auto justify-between lg:justify-end overflow-x-auto pb-1 lg:pb-0">
           <div className="bg-slate-950 p-1 rounded-xl border border-slate-800 flex items-center gap-1 shrink-0">
             <button
               onClick={() => onFilterChange('all')}
@@ -141,47 +148,73 @@ export const UsersTable: React.FC<UsersTableProps> = ({
             </button>
             <button
               onClick={() => onFilterChange('pending')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-1.5 ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 ${
                 selectedFilter === 'pending'
-                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              <Clock className="w-3 h-3 text-amber-400" />
-              <span>معلق ({users.filter((u) => u.status === 'pending').length})</span>
+              <Clock className="w-3.5 h-3.5 text-amber-400" />
+              <span>قيد الانتظار ({users.filter((u) => u.status === 'pending').length})</span>
             </button>
             <button
               onClick={() => onFilterChange('active')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-1.5 ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 ${
                 selectedFilter === 'active'
-                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-              <span>نشط ({users.filter((u) => u.status === 'active').length})</span>
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+              <span>المقبولين النشطين ({users.filter((u) => u.status === 'active').length})</span>
+            </button>
+            <button
+              onClick={() => onFilterChange('rejected')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 ${
+                selectedFilter === 'rejected'
+                  ? 'bg-orange-500/20 text-orange-300 border border-orange-500/40 shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <UserX className="w-3.5 h-3.5 text-orange-400" />
+              <span>المرفوضين ({users.filter((u) => u.status === 'rejected').length})</span>
             </button>
             <button
               onClick={() => onFilterChange('banned')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-1.5 ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 ${
                 selectedFilter === 'banned'
-                  ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                  ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 shadow-sm'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              <ShieldBan className="w-3 h-3 text-rose-400" />
-              <span>محظور ({users.filter((u) => u.status === 'banned').length})</span>
+              <ShieldBan className="w-3.5 h-3.5 text-rose-400" />
+              <span>المحظورين ({users.filter((u) => u.status === 'banned').length})</span>
             </button>
           </div>
 
-          <button
-            type="button"
-            onClick={exportToCSV}
-            title="تصدير جدول المستخدمين كـ CSV"
-            className="p-2 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded-xl text-slate-400 hover:text-slate-200 transition shrink-0"
-          >
-            <Download className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-1.5 shrink-0">
+            {onSyncCloud && (
+              <button
+                type="button"
+                onClick={onSyncCloud}
+                disabled={isSyncing}
+                title="مزامنة وجلب الطلبات الجديدة من جروب السحابة"
+                className="flex items-center gap-1.5 bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 border border-indigo-500/40 px-3 py-2 rounded-xl text-xs font-semibold transition shadow-sm disabled:opacity-50"
+              >
+                <span className={isSyncing ? 'animate-spin inline-block' : ''}>🔄</span>
+                <span className="hidden sm:inline">مزامنة السحابة</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={exportToCSV}
+              title="تصدير جدول المستخدمين كـ CSV"
+              className="p-2 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded-xl text-slate-400 hover:text-slate-200 transition shrink-0"
+            >
+              <Download className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       </div>
 
@@ -368,13 +401,19 @@ export const UsersTable: React.FC<UsersTableProps> = ({
                       {user.status === 'active' && (
                         <span className="inline-flex items-center gap-1 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs px-2.5 py-1 rounded-full font-medium">
                           <CheckCircle2 className="w-3 h-3" />
-                          <span>نشط ✅</span>
+                          <span>نشط ومقبول ✅</span>
                         </span>
                       )}
                       {user.status === 'pending' && (
                         <span className="inline-flex items-center gap-1 bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs px-2.5 py-1 rounded-full font-medium">
                           <Clock className="w-3 h-3" />
-                          <span>معلق ⏳</span>
+                          <span>قيد الانتظار ⏳</span>
+                        </span>
+                      )}
+                      {user.status === 'rejected' && (
+                        <span className="inline-flex items-center gap-1 bg-orange-500/10 border border-orange-500/30 text-orange-400 text-xs px-2.5 py-1 rounded-full font-medium">
+                          <XCircle className="w-3 h-3" />
+                          <span>مرفوض ❌</span>
                         </span>
                       )}
                       {user.status === 'banned' && (
@@ -389,16 +428,29 @@ export const UsersTable: React.FC<UsersTableProps> = ({
                     <td className="py-3.5 px-4 align-top text-center">
                       <div className="flex items-center justify-center gap-1.5 flex-wrap">
                         
-                        {/* Approve button (for pending or banned users) */}
+                        {/* Approve button (for pending, rejected or banned users) */}
                         {user.status !== 'active' && (
                           <button
                             type="button"
                             onClick={() => onApprove(user)}
-                            title="تفعيل الحساب (Approve)"
-                            className="flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-2.5 py-1 rounded-lg transition shadow-sm font-medium"
+                            title="تفعيل الحساب وإرسال #APPROVE إلى السحابة"
+                            className="flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-2.5 py-1 rounded-lg transition shadow-sm font-semibold"
                           >
                             <UserCheck className="w-3.5 h-3.5" />
-                            <span>تفعيل</span>
+                            <span>موافقة</span>
+                          </button>
+                        )}
+
+                        {/* Reject button (for pending or active users) */}
+                        {user.status !== 'rejected' && user.status !== 'banned' && (
+                          <button
+                            type="button"
+                            onClick={() => onReject(user)}
+                            title="رفض الطلب وإرسال #REJECT إلى السحابة"
+                            className="flex items-center gap-1 bg-orange-950/80 hover:bg-orange-900 border border-orange-700 text-orange-300 text-xs px-2.5 py-1 rounded-lg transition font-semibold"
+                          >
+                            <UserX className="w-3.5 h-3.5 text-orange-400" />
+                            <span>رفض</span>
                           </button>
                         )}
 

@@ -1,4 +1,4 @@
-export type UserStatus = 'active' | 'pending' | 'banned';
+export type UserStatus = 'active' | 'pending' | 'rejected' | 'banned';
 
 export interface UserRecord {
   id: string;
@@ -27,6 +27,7 @@ export type LogEventType =
   | 'ban_trigger'
   | 'status_change'
   | 'user_register'
+  | 'cloud_sync'
   | 'telegram_alert';
 
 export interface AccessLog {
@@ -67,6 +68,7 @@ export interface AdminStats {
   totalUsers: number;
   pendingUsers: number;
   activeUsers: number;
+  rejectedUsers: number;
   bannedUsers: number;
   totalLogsToday: number;
   bannedIPsCount: number;
