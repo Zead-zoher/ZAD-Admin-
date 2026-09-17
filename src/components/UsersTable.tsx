@@ -195,14 +195,15 @@ export const UsersTable: React.FC<UsersTableProps> = ({
           <div className="flex items-center gap-1.5 shrink-0">
             {onSyncCloud && (
               <button
+                id="cloud-sync-btn"
                 type="button"
                 onClick={onSyncCloud}
                 disabled={isSyncing}
-                title="مزامنة وجلب الطلبات الجديدة من جروب السحابة"
-                className="flex items-center gap-1.5 bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 border border-indigo-500/40 px-3 py-2 rounded-xl text-xs font-semibold transition shadow-sm disabled:opacity-50"
+                title="مزامنة وجلب كافة السجلات والرسائل من جروب التليجرام"
+                className="flex items-center gap-1.5 bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 border border-indigo-500/40 px-3.5 py-2 rounded-xl text-xs font-semibold transition shadow-sm active:scale-95 disabled:opacity-50"
               >
                 <span className={isSyncing ? 'animate-spin inline-block' : ''}>🔄</span>
-                <span className="hidden sm:inline">مزامنة السحابة</span>
+                <span className="hidden sm:inline">جلب وقراءة بيانات السحابة</span>
               </button>
             )}
 
@@ -486,11 +487,11 @@ export const UsersTable: React.FC<UsersTableProps> = ({
                           <Edit2 className="w-3.5 h-3.5" />
                         </button>
 
-                        {/* Delete button */}
+                        {/* Delete button - wipes messages from Telegram group */}
                         <button
                           type="button"
                           onClick={() => onDelete(user)}
-                          title="حذف الحساب نهائياً"
+                          title={`حذف المستخدم (@${user.username}) ومسح كافة رسائله من جروب التليجرام`}
                           className="p-1 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition"
                         >
                           <Trash2 className="w-3.5 h-3.5" />

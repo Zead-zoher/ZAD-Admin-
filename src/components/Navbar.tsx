@@ -65,15 +65,15 @@ export const Navbar: React.FC<NavbarProps> = ({
             <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse"></span>
           </button>
 
-          {/* Add User Button */}
+          {/* Add Admin Button */}
           <button
             id="add-user-top-btn"
             type="button"
             onClick={onOpenAddUser}
             className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold px-3.5 py-1.5 rounded-xl shadow-md shadow-indigo-600/20 transition active:scale-95"
           >
-            <Plus className="w-3.5 h-3.5" />
-            <span>إضافة مستخدم</span>
+            <Shield className="w-3.5 h-3.5" />
+            <span>إضافة أدمن</span>
           </button>
 
           {/* Disguise / Instant 404 Hide Button */}

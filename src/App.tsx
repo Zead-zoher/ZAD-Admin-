@@ -29,10 +29,13 @@ import {
   sendUserApprovedAlert,
   sendUserBannedAlert,
   sendAdminLoginAlert,
-  syncBanToCloudDatabaseGroup,
   sendUserApprovalToCloud,
   sendUserRejectionToCloud,
+  sendUserBanToCloud,
+  syncBanToCloudDatabaseGroup,
+  sendNewAdminRequestToGroup,
   fetchCloudUsersFromTelegram,
+  deleteUserMessagesFromTelegramGroup,
 } from './services/telegram';
 import { getClientDeviceInfo, getClientPublicIP } from './services/deviceInfo';
 import { AccessLog, AdminStats, BannedEntity, TelegramSettings, UserRecord } from './types';
@@ -478,12 +481,12 @@ export default function App() {
     });
     setLogs(getStoredLogs());
 
-    // Telegram Notification
-    await sendUserBannedAlert(telegramSettings, user, reason);
+    // Telegram Notification & Cloud Edit to S(banned)
+    await sendUserBanToCloud(telegramSettings, { ...user, status: 'banned', banReason: reason }, reason);
   };
 
   // User Actions: ⚪ Unban
-  const handleUnbanUser = (user: UserRecord) => {
+  const handleUnbanUser = async (user: UserRecord) => {
     const updatedUsers = users.map((u) =>
       u.id === user.id ? { ...u, status: 'active' as const, banReason: undefined } : u
     );
@@ -509,29 +512,53 @@ export default function App() {
       userRef: user.username,
     });
     setLogs(getStoredLogs());
+
+    // Update Telegram message to S(active)
+    await sendUserApprovalToCloud(telegramSettings, { ...user, status: 'active', banReason: undefined });
   };
 
-  // User Actions: 🗑️ Delete
-  const handleDeleteUser = (user: UserRecord) => {
-    if (!window.confirm(`هل أنت متأكد من حذف الحساب "${user.displayName}" نهائياً من النظام؟`)) {
+  // User Actions: 🗑️ Delete (wipes all user messages from Telegram cloud group & local state)
+  const handleDeleteUser = async (user: UserRecord) => {
+    if (!window.confirm(`هل أنت متأكد من حذف الحساب "${user.displayName}" (@${user.username}) ومسح كافة رسائله من جروب التليجرام؟`)) {
       return;
     }
-    const updated = users.filter((u) => u.id !== user.id);
+
+    // 1. Remove from local list immediately
+    const updated = users.filter((u) => u.id !== user.id && u.username !== user.username);
     setUsers(updated);
     saveStoredUsers(updated);
 
-    addAccessLog({
-      ip: user.ip,
-      location: user.location,
-      device: user.browser,
-      os: user.os,
-      deviceId: user.deviceId,
-      eventType: 'admin_action',
-      details: `تم حذف حساب المستخدم ${user.displayName} (@${user.username}) نهائياً`,
-      status: 'warning',
-      userRef: user.username,
-    });
-    setLogs(getStoredLogs());
+    // 2. Scan and delete all messages containing this user from the Telegram Group
+    try {
+      const delResult = await deleteUserMessagesFromTelegramGroup(telegramSettings, user.username);
+      
+      addAccessLog({
+        ip: user.ip,
+        location: user.location,
+        device: user.browser,
+        os: user.os,
+        deviceId: user.deviceId,
+        eventType: 'admin_action',
+        details: `تم حذف حساب المستخدم @${user.username} ومسح ${delResult.deletedCount || 0} رسالة متعلقة به من جروب التليجرام السحابي`,
+        status: 'warning',
+        userRef: user.username,
+      });
+      setLogs(getStoredLogs());
+    } catch (e) {
+      console.error('Failed to wipe messages from Telegram group:', e);
+      addAccessLog({
+        ip: user.ip,
+        location: user.location,
+        device: user.browser,
+        os: user.os,
+        deviceId: user.deviceId,
+        eventType: 'admin_action',
+        details: `تم حذف حساب @${user.username} محلياً وجاري مزامنة مسح رسائله من التليجرام`,
+        status: 'warning',
+        userRef: user.username,
+      });
+      setLogs(getStoredLogs());
+    }
   };
 
   // User Actions: ✏️ Edit & ➕ Add
@@ -540,8 +567,32 @@ export default function App() {
     setIsUserModalOpen(true);
   };
 
+  // Action: 👑 Add/Promote New Admin (#newadmin) to Telegram Group
+  const handleSendNewAdmin = async (adminUsername: string, adminPassword: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const res = await sendNewAdminRequestToGroup(telegramSettings, adminUsername, adminPassword, 'Admin_0909');
+      if (res.success) {
+        addAccessLog({
+          ip: clientInfo.ip,
+          location: clientInfo.location,
+          device: 'Admin Console',
+          os: clientInfo.os,
+          deviceId: clientInfo.deviceId,
+          eventType: 'admin_action',
+          details: `تم إرسال طلب تعيين أدمن جديد (#newadmin) إلى جروب التليجرام: @${adminUsername}`,
+          status: 'info',
+          userRef: adminUsername,
+        });
+        setLogs(getStoredLogs());
+      }
+      return res;
+    } catch (e) {
+      console.error('Failed to send #newadmin request to telegram:', e);
+      return { success: false, error: 'تعذر الاتصال بخادم التليجرام' };
+    }
+  };
+
   const handleOpenAddUser = () => {
-    setUserToEdit(null);
     setIsUserModalOpen(true);
   };
 
@@ -896,8 +947,8 @@ export default function App() {
       <UserModal
         isOpen={isUserModalOpen}
         onClose={() => setIsUserModalOpen(false)}
-        onSave={handleSaveUser}
-        userToEdit={userToEdit}
+        existingUsers={users}
+        onSendNewAdmin={handleSendNewAdmin}
       />
 
       <BanModal

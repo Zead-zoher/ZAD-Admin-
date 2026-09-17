@@ -18,6 +18,8 @@ export interface UserRecord {
   notes?: string;
   banReason?: string;
   isOnline?: boolean;
+  telegramMessageId?: number;
+  rawTelegramText?: string;
 }
 
 export type LogEventType =
