@@ -32,7 +32,7 @@ export async function sendTelegramMessage(
   token: string,
   chatId: string,
   message: string,
-  parseMode: 'HTML' | 'Markdown' = 'HTML',
+  parseMode?: 'HTML' | 'Markdown',
   replyMarkup?: any
 ): Promise<{ success: boolean; messageId?: number; error?: string }> {
   if (!token || !chatId) {
@@ -43,8 +43,11 @@ export async function sendTelegramMessage(
     const payload: any = {
       chat_id: chatId.trim(),
       text: message,
-      parse_mode: parseMode,
     };
+
+    if (parseMode) {
+      payload.parse_mode = parseMode;
+    }
 
     if (replyMarkup) {
       payload.reply_markup = replyMarkup;
@@ -109,7 +112,7 @@ export async function editTelegramMessage(
 }
 
 /**
- * Deletes a single message from a Telegram chat/group
+ * Deletes a single message from a Telegram chat/group using deleteMessage
  */
 export async function deleteTelegramMessage(
   token: string,
@@ -140,7 +143,7 @@ export async function deleteTelegramMessage(
 /**
  * Generates the standardized user message string for Telegram Database Group (-1004362776828)
  * Format:
- * #@(username)/(الاسم الحقيقي)/(البريد الإلكتروني)
+ * @username/(الاسم الحقيقي)/(البريد الإلكتروني)
  * P(كلمة المرور)
  * S(الحالة)
  * D(IP: [ip] | Fingerprint: [fingerprint])
@@ -148,12 +151,16 @@ export async function deleteTelegramMessage(
  * L(تاريخ ووقت آخر فتح للموقع)
  * LD(نظام التشغيل | المتصفح)
  */
-export function formatUserTelegramMessage(user: UserRecord, statusOverride?: UserStatus): string {
+export function formatUserTelegramMessage(
+  user: UserRecord,
+  statusOverride?: UserStatus,
+  passwordOverride?: string
+): string {
   const status = statusOverride || user.status || 'pending';
   const cleanUsername = user.username.replace(/^@/, '').trim();
   const cleanDisplayName = (user.displayName || cleanUsername).trim();
   const email = (user.email || `${cleanUsername}@gmail.com`).trim();
-  const password = user.password || '••••••••';
+  const password = passwordOverride || user.password || '••••••••';
   const ip = user.ip || '197.38.112.44';
   const deviceId = user.deviceId || `FP-${cleanUsername.toUpperCase()}`;
   const location = user.location || 'القاهرة - مصر';
@@ -161,7 +168,7 @@ export function formatUserTelegramMessage(user: UserRecord, statusOverride?: Use
   const os = user.os || 'Web Browser';
   const browser = user.browser || 'Web';
 
-  return `#@(${cleanUsername})/(${cleanDisplayName})/(${email})
+  return `@${cleanUsername}/(${cleanDisplayName})/(${email})
 P(${password})
 S(${status})
 D(IP: [${ip}] | Fingerprint: [${deviceId}])
@@ -183,7 +190,7 @@ async function searchUserMessageInGroup(
     const allowed = encodeURIComponent(JSON.stringify(["message", "channel_post", "edited_message", "edited_channel_post"]));
     
     // Fetch last updates from group
-    const res = await fetch(`https://api.telegram.org/bot${token.trim()}/getUpdates?offset=-50&limit=50&allowed_updates=${allowed}`);
+    const res = await fetch(`https://api.telegram.org/bot${token.trim()}/getUpdates?offset=-60&limit=100&allowed_updates=${allowed}`);
     const data = await res.json();
     if (!data.ok || !Array.isArray(data.result)) return null;
 
@@ -196,9 +203,10 @@ async function searchUserMessageInGroup(
       const textLower = text.toLowerCase();
 
       if (
-        textLower.includes(`#@(${cleanUname})`) ||
-        textLower.includes(`#@${cleanUname}`) ||
-        textLower.includes(`@${cleanUname}`) ||
+        textLower.startsWith(`@${cleanUname}/`) ||
+        textLower.startsWith(`#@(${cleanUname})/`) ||
+        textLower.startsWith(`#@${cleanUname}/`) ||
+        textLower.includes(`@${cleanUname}/`) ||
         textLower.includes(`"username":"${cleanUname}"`) ||
         textLower.includes(`"username": "${cleanUname}"`)
       ) {
@@ -262,6 +270,51 @@ export async function updateUserStatusInTelegramGroup(
 }
 
 /**
+ * Updates a user's password in the Telegram Database Group by editing their message (editMessageText)
+ * Changes P(...) -> P(newPassword)
+ */
+export async function updateUserPasswordInTelegramGroup(
+  settings: TelegramSettings,
+  user: UserRecord,
+  newPassword: string
+): Promise<{ success: boolean; error?: string }> {
+  const token = settings.botToken || DEFAULT_TELEGRAM_SETTINGS.botToken;
+  const groupId = settings.databaseGroupId || DEFAULT_TELEGRAM_SETTINGS.databaseGroupId;
+
+  if (!token || !groupId) {
+    return { success: false, error: 'بيانات التيليجرام غير مكتملة' };
+  }
+
+  let newText = '';
+  if (user.rawTelegramText && /P\([^)]*\)/i.test(user.rawTelegramText)) {
+    newText = user.rawTelegramText.replace(/P\([^)]*\)/i, `P(${newPassword.trim()})`);
+  } else {
+    newText = formatUserTelegramMessage(user, user.status, newPassword.trim());
+  }
+
+  if (user.telegramMessageId) {
+    const editRes = await editTelegramMessage(token, groupId, user.telegramMessageId, newText);
+    if (editRes.success) {
+      return { success: true };
+    }
+  }
+
+  const found = await searchUserMessageInGroup(token, groupId, user.username);
+  if (found) {
+    const updatedFoundText = /P\([^)]*\)/i.test(found.text)
+      ? found.text.replace(/P\([^)]*\)/i, `P(${newPassword.trim()})`)
+      : formatUserTelegramMessage(user, user.status, newPassword.trim());
+
+    const editRes = await editTelegramMessage(token, groupId, found.messageId, updatedFoundText);
+    if (editRes.success) {
+      return { success: true };
+    }
+  }
+
+  return { success: false, error: 'تعذر العثور على رسالة المستخدم في الجروب لتعديل كلمة المرور' };
+}
+
+/**
  * Approves a user by editing their message in the database group to S(active)
  */
 export async function sendUserApprovalToCloud(
@@ -302,14 +355,14 @@ export async function sendUserRejectionToCloud(
 ━━━━━━━━━━━━━━━━━
 ⚠️ <i>تم تعديل الحالة إلى S(rejected) في جروب قاعدة البيانات.</i>
     `.trim();
-    await sendTelegramMessage(settings.botToken, settings.adminChatId, adminAlertText);
+    await sendTelegramMessage(settings.botToken, settings.adminChatId, adminAlertText, 'HTML');
   }
 
   return res;
 }
 
 /**
- * Bans a user by editing their message in the database group to S(banned)
+ * Bans a user and their device/IP by editing their message in the database group to S(banned)
  */
 export async function sendUserBanToCloud(
   settings: TelegramSettings,
@@ -340,9 +393,6 @@ export async function syncBanToCloudDatabaseGroup(
     reason?: string;
   }
 ): Promise<{ success: boolean; error?: string }> {
-  const token = settings.botToken || DEFAULT_TELEGRAM_SETTINGS.botToken;
-  const groupId = settings.databaseGroupId || DEFAULT_TELEGRAM_SETTINGS.databaseGroupId;
-
   const mockUser: UserRecord = {
     id: `usr-${payload.username}`,
     displayName: payload.username,
@@ -364,8 +414,9 @@ export async function syncBanToCloudDatabaseGroup(
 }
 
 /**
- * Scans all messages in the Telegram Cloud Group, finds any message containing the user's username
- * and deletes them completely from the group. Once deleted, the main site detects removal.
+ * Scans all messages in the Telegram Cloud Group, finds any message belonging to the user
+ * and deletes them completely from the group via deleteMessage.
+ * Once deleted, the main site detects removal automatically.
  */
 export async function deleteUserMessagesFromTelegramGroup(
   settings: TelegramSettings,
@@ -420,9 +471,10 @@ export async function deleteUserMessagesFromTelegramGroup(
       const text = (msg.text || msg.caption || '').toLowerCase();
       
       if (
-        text.includes(`#@(${cleanTargetUname})`) ||
-        text.includes(`#@${cleanTargetUname}`) ||
-        text.includes(cleanTargetUname) ||
+        text.startsWith(`@${cleanTargetUname}/`) ||
+        text.startsWith(`#@(${cleanTargetUname})/`) ||
+        text.startsWith(`#@${cleanTargetUname}/`) ||
+        text.includes(`@${cleanTargetUname}/`) ||
         text.includes(`@${cleanTargetUname}`) ||
         text.includes(`"username":"${cleanTargetUname}"`) ||
         text.includes(`"username": "${cleanTargetUname}"`) ||
@@ -432,7 +484,7 @@ export async function deleteUserMessagesFromTelegramGroup(
       }
     }
 
-    // 3. Delete matching messages from the Telegram Group
+    // 3. Delete matching messages from the Telegram Group via deleteMessage
     let deletedCount = 0;
     for (const msgId of messagesToDelete) {
       try {
@@ -524,7 +576,6 @@ export async function checkTelegram2FAApproval(
     const updates = data.result;
 
     for (const update of updates) {
-      // Check callback query
       if (update.callback_query?.data) {
         const callbackData = update.callback_query.data;
         if (callbackData === `allow_${authId}`) {
@@ -535,7 +586,6 @@ export async function checkTelegram2FAApproval(
         }
       }
 
-      // Check text message command or channel post
       const msg = update.message || update.channel_post || update.edited_message || update.edited_channel_post;
       if (msg && (msg.text || msg.caption)) {
         const msgText = (msg.text || msg.caption || '').trim();
@@ -619,10 +669,10 @@ Password: ${password}
 
 /**
  * Standardized Parser for User Records in Telegram
- * Prioritizes the official format:
- * #@(username)/(الاسم الحقيقي)/(البريد الإلكتروني)
+ * 📌 بنية رسالة المستخدم في الجروب:
+ * @username/(الاسم الحقيقي)/(البريد الإلكتروني)
  * P(كلمة المرور)
- * S(الحالة)
+ * S(الحالة: pending أو active أو rejected أو banned)
  * D(IP: [ip] | Fingerprint: [fingerprint])
  * H(المدينة - الدولة)
  * L(تاريخ ووقت آخر فتح للموقع)
@@ -632,46 +682,50 @@ export function parseUserRecordFromText(text: string, msgDate?: number, msgId?: 
   try {
     if (!text || typeof text !== 'string') return null;
 
-    // 1. Check Primary Standard Format: #@(username)/(name)/(email)
-    const headerMatch = text.match(/#@(?:\(([^)]+)\)|([^\/\n\r]+))(?:\/(?:\(([^)]+)\)|([^\/\n\r]+)))?(?:\/(?:\(([^)]+)\)|([^\/\n\r]+)))?/);
+    const trimmed = text.trim();
 
-    if (headerMatch) {
-      const rawUsername = (headerMatch[1] || headerMatch[2] || '').trim().replace(/^@/, '');
-      if (rawUsername && rawUsername.toUpperCase() !== 'REJECT' && rawUsername.toUpperCase() !== 'APPROVE' && rawUsername.toUpperCase() !== 'BAN') {
-        const rawDisplayName = (headerMatch[3] || headerMatch[4] || rawUsername).trim();
-        const rawEmail = (headerMatch[5] || headerMatch[6] || `${rawUsername}@gmail.com`).trim();
+    // 1. Check Standard Header: @username/(Name)/(Email) or #@(username)/(Name)/(Email)
+    // Matches @username, @(username), #@username, #@(username)
+    const headerLineMatch = trimmed.match(/^#?@(?:\(([^)]+)\)|([^\/\n\r\s]+))(?:\/(?:\(([^)]*)\)|([^\/\n\r]+)))?(?:\/(?:\(([^)]*)\)|([^\/\n\r]+)))?/m);
 
-        // Extract P(...)
-        const passMatch = text.match(/P\(([^)]*)\)/i);
+    if (headerLineMatch) {
+      const rawUsername = (headerLineMatch[1] || headerLineMatch[2] || '').trim().replace(/^@/, '');
+      
+      if (rawUsername && !['REJECT', 'APPROVE', 'BAN', 'NEWADMIN', 'USER_RECORD'].includes(rawUsername.toUpperCase())) {
+        const rawDisplayName = (headerLineMatch[3] || headerLineMatch[4] || rawUsername).trim();
+        const rawEmail = (headerLineMatch[5] || headerLineMatch[6] || `${rawUsername}@gmail.com`).trim();
+
+        // Extract P(Password)
+        const passMatch = trimmed.match(/^P\(([^)]*)\)/im) || trimmed.match(/P\(([^)]*)\)/i);
         const password = passMatch ? passMatch[1].trim() : '••••••••';
 
-        // Extract S(...)
-        const statusMatch = text.match(/S\(([^)]*)\)/i);
+        // Extract S(Status) -> pending | active | rejected | banned
+        const statusMatch = trimmed.match(/^S\(([^)]*)\)/im) || trimmed.match(/S\(([^)]*)\)/i);
         let status: UserStatus = 'pending';
         if (statusMatch) {
           const sVal = statusMatch[1].trim().toLowerCase();
-          if (sVal === 'active' || sVal === 'pending' || sVal === 'rejected' || sVal === 'banned') {
+          if (['active', 'pending', 'rejected', 'banned'].includes(sVal)) {
             status = sVal as UserStatus;
           }
         }
 
         // Extract D(...) -> IP & Fingerprint
-        const ipMatch = text.match(/IP:\s*\[?([0-9a-fA-F\.:]+)\]?/i) || text.match(/(\b(?:\d{1,3}\.){3}\d{1,3}\b)/);
-        const ip = ipMatch ? ipMatch[1].trim() : '197.38.112.44';
+        const ipMatch = trimmed.match(/IP:\s*\[?([0-9a-fA-F\.:]+)\]?/i) || trimmed.match(/(\b(?:\d{1,3}\.){3}\d{1,3}\b)/);
+        const ip = ipMatch ? (typeof ipMatch[1] === 'string' ? ipMatch[1].trim() : ipMatch[0]) : '197.38.112.44';
 
-        const fpMatch = text.match(/Fingerprint:\s*\[?([^\]\)\s]+)\]?/i) || text.match(/بصمة الجهاز:\s*<code>?([^<\n\r]+)<\/code>?/i);
+        const fpMatch = trimmed.match(/Fingerprint:\s*\[?([^\]\)\s\n]+)\]?/i) || trimmed.match(/بصمة الجهاز:\s*<code>?([^<\n\r]+)<\/code>?/i);
         const deviceId = fpMatch ? fpMatch[1].trim() : `FP-${rawUsername.toUpperCase()}`;
 
         // Extract H(...) -> Location
-        const hMatch = text.match(/H\(([^)]*)\)/i);
+        const hMatch = trimmed.match(/^H\(([^)]*)\)/im) || trimmed.match(/H\(([^)]*)\)/i);
         const location = hMatch && hMatch[1].trim() ? hMatch[1].trim() : 'القاهرة - مصر';
 
         // Extract L(...) -> Last Seen
-        const lMatch = text.match(/L\(([^)]*)\)/i);
+        const lMatch = trimmed.match(/^L\(([^)]*)\)/im) || trimmed.match(/L\(([^)]*)\)/i);
         const lastActive = lMatch && lMatch[1].trim() ? lMatch[1].trim() : 'منذ قليل';
 
         // Extract LD(...) -> OS | Browser
-        const ldMatch = text.match(/LD\(([^)]*)\)/i);
+        const ldMatch = trimmed.match(/^LD\(([^)]*)\)/im) || trimmed.match(/LD\(([^)]*)\)/i);
         let os = 'Web Browser';
         let browser = 'Web';
         if (ldMatch && ldMatch[1]) {
@@ -680,13 +734,15 @@ export function parseUserRecordFromText(text: string, msgDate?: number, msgId?: 
           if (parts[1]) browser = parts[1];
         }
 
-        const formattedDate = msgDate ? new Date(msgDate * 1000).toISOString().replace('T', ' ').substring(0, 19) : new Date().toISOString().replace('T', ' ').substring(0, 19);
+        const formattedDate = msgDate 
+          ? new Date(msgDate * 1000).toISOString().replace('T', ' ').substring(0, 19) 
+          : new Date().toISOString().replace('T', ' ').substring(0, 19);
 
         return {
           id: `usr-${rawUsername}`,
-          displayName: rawDisplayName,
+          displayName: rawDisplayName || rawUsername,
           username: rawUsername,
-          email: rawEmail,
+          email: rawEmail || `${rawUsername}@gmail.com`,
           password: password,
           ip: ip,
           location: location,
@@ -706,14 +762,14 @@ export function parseUserRecordFromText(text: string, msgDate?: number, msgId?: 
 
     // 2. Fallback: Try finding JSON inside <code>...</code> or {...}
     let jsonStr: string | null = null;
-    const codeMatch = text.match(/<code>([\s\S]*?)<\/code>/i);
+    const codeMatch = trimmed.match(/<code>([\s\S]*?)<\/code>/i);
     if (codeMatch && codeMatch[1].includes('{') && codeMatch[1].includes('}')) {
       const match = codeMatch[1].match(/\{[\s\S]*\}/);
       if (match) jsonStr = match[0];
     }
     
     if (!jsonStr) {
-      const directMatch = text.match(/\{[\s\S]*\}/);
+      const directMatch = trimmed.match(/\{[\s\S]*\}/);
       if (directMatch) jsonStr = directMatch[0];
     }
 
@@ -730,7 +786,7 @@ export function parseUserRecordFromText(text: string, msgDate?: number, msgId?: 
             id: parsed.id || `usr-${cleanUname}`,
             displayName: parsed.fullName || parsed.name || parsed.displayName || cleanUname,
             username: cleanUname,
-            email: parsed.email || `${cleanUname}@omni-zad.app`,
+            email: parsed.email || `${cleanUname}@gmail.com`,
             password: parsed.rawPassword || parsed.password || '••••••••',
             ip: parsed.ip || '197.38.112.44',
             location: parsed.location || (parsed.country ? `${parsed.country}${parsed.city ? ` - ${parsed.city}` : ''}` : 'القاهرة - مصر'),
@@ -752,47 +808,7 @@ export function parseUserRecordFromText(text: string, msgDate?: number, msgId?: 
       }
     }
 
-    // 3. Fallback: Regex parser for legacy HTML/Text messages
-    const usernameMatch = 
-      text.match(/(?:اسم المستخدم|اليوزر|User(?:name)?|Account):\s*<code>?([^<\n\r]+)<\/code>?/i) ||
-      text.match(/#(?:USER_RECORD|USER|REGISTER|NEW_USER)\s+([a-zA-Z0-9_]+)/i) ||
-      text.match(/(?:username|user)\s*[:=]\s*([a-zA-Z0-9_]+)/i) ||
-      text.match(/@([a-zA-Z0-9_]{3,})/);
-
-    if (!usernameMatch) return null;
-
-    const username = (usernameMatch[1] || usernameMatch[0]).replace(/^@/, '').trim();
-    if (!username || username.toUpperCase() === 'REJECT' || username.toUpperCase() === 'APPROVE' || username.toUpperCase() === 'BAN' || username.toUpperCase() === 'LAST_SEEN') {
-      return null;
-    }
-
-    const displayNameMatch = text.match(/(?:الاسم|Name|Full Name):\s*<code>?([^<\n\r]+)<\/code>?/i);
-    const emailMatch = text.match(/(?:البريد|الإيميل|Email):\s*<code>?([^<\n\r]+)<\/code>?/i) || text.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i);
-    const passMatch = text.match(/(?:كلمة المرور|الباسورد|Password|Pass):\s*<code>?([^<\n\r]+)<\/code>?/i);
-    const ipMatch = text.match(/(?:الـ\s*IP|عنوان الـ IP|IP(?:\s*Address)?):\s*<code>?([^<\n\r]+)<\/code>?/i) || text.match(/(\b(?:\d{1,3}\.){3}\d{1,3}\b)/);
-    const deviceMatch = text.match(/(?:بصمة الجهاز|البصمة|Fingerprint|Device ID):\s*<code>?([^<\n\r]+)<\/code>?/i);
-    const osMatch = text.match(/(?:نظام التشغيل|الجهاز|OS|Device):\s*<code>?([^<\n\r]+)<\/code>?/i);
-
-    return {
-      id: `usr-${username}`,
-      displayName: displayNameMatch ? displayNameMatch[1].trim() : username,
-      username: username,
-      email: emailMatch ? (typeof emailMatch[1] === 'string' ? emailMatch[1].trim() : emailMatch[0]) : `${username}@omni-zad.app`,
-      password: passMatch ? passMatch[1].trim() : '••••••••',
-      ip: ipMatch ? (typeof ipMatch[1] === 'string' ? ipMatch[1].trim() : ipMatch[0]) : '197.38.112.44',
-      location: 'القاهرة - مصر',
-      countryCode: 'EG',
-      deviceId: deviceMatch ? deviceMatch[1].trim() : `FP-${username.toUpperCase()}`,
-      os: osMatch ? osMatch[1].trim() : 'Web Browser',
-      browser: 'Web Browser',
-      registeredAt: msgDate ? new Date(msgDate * 1000).toISOString().replace('T', ' ').substring(0, 19) : new Date().toISOString().replace('T', ' ').substring(0, 19),
-      lastActive: 'منذ قليل',
-      status: 'pending',
-      notes: 'تم الجلب من السحابة',
-      isOnline: true,
-      telegramMessageId: msgId,
-      rawTelegramText: text,
-    };
+    return null;
   } catch {
     return null;
   }
@@ -800,7 +816,7 @@ export function parseUserRecordFromText(text: string, msgDate?: number, msgId?: 
 
 /**
  * Cloud Fetching: Reads all messages from Database Group (-1004362776828)
- * Extracts users, calculates statuses (pending, active, rejected, banned), and syncs state.
+ * Telegram Group is the Single Source of Truth.
  */
 export async function fetchCloudUsersFromTelegram(
   settings: TelegramSettings
@@ -820,7 +836,7 @@ export async function fetchCloudUsersFromTelegram(
     let keepFetching = true;
     let iterations = 0;
 
-    while (keepFetching && iterations < 5) {
+    while (keepFetching && iterations < 6) {
       iterations++;
       const url = currentOffset 
         ? `https://api.telegram.org/bot${token.trim()}/getUpdates?offset=${currentOffset}&limit=100&allowed_updates=${allowed}`
@@ -869,7 +885,7 @@ export async function fetchCloudUsersFromTelegram(
       const msgDate = msg.date;
       const msgId = msg.message_id;
 
-      // 1. Primary User Message Parser (#@ or USER_RECORD or standard format)
+      // 1. Primary User Message Parser (@username or #@)
       const parsedUser = parseUserRecordFromText(text, msgDate, msgId);
       if (parsedUser && parsedUser.username) {
         const cleanUname = parsedUser.username;
@@ -881,14 +897,14 @@ export async function fetchCloudUsersFromTelegram(
           usersMap.set(cleanUname, {
             ...existing,
             ...parsedUser,
-            // Keep the latest messageId and raw text if available
             telegramMessageId: msgId || existing.telegramMessageId,
             rawTelegramText: text || existing.rawTelegramText,
             status: parsedUser.status || existing.status,
+            password: parsedUser.password !== '••••••••' ? parsedUser.password : existing.password,
           });
         }
 
-        // If parsed user status is banned, add to bannedSet
+        // If user is marked S(banned), register into bannedSet
         if (parsedUser.status === 'banned') {
           bannedSet.push({
             ip: parsedUser.ip,
@@ -896,73 +912,6 @@ export async function fetchCloudUsersFromTelegram(
             username: cleanUname,
             reason: 'حظر تلقائي عبر حالة S(banned)',
           });
-        }
-      }
-
-      // 2. Secondary/Legacy #APPROVE handler
-      if (text.includes('#APPROVE') || text.includes('/approve')) {
-        const approveMatch = text.match(/#APPROVE\s+([a-zA-Z0-9_]+)/i) || 
-                             text.match(/\/approve[_\s]+([a-zA-Z0-9_]+)/i);
-        if (approveMatch) {
-          const uname = approveMatch[1].trim();
-          const target = usersMap.get(uname);
-          if (target) {
-            target.status = 'active';
-            usersMap.set(uname, target);
-          }
-        }
-      }
-
-      // 3. Secondary/Legacy #REJECT handler
-      if (text.includes('#REJECT') || text.includes('/reject')) {
-        const rejectMatch = text.match(/#REJECT\s+([a-zA-Z0-9_]+)/i) || 
-                            text.match(/\/reject[_\s]+([a-zA-Z0-9_]+)/i);
-        if (rejectMatch) {
-          const uname = rejectMatch[1].trim();
-          const target = usersMap.get(uname);
-          if (target) {
-            target.status = 'rejected';
-            usersMap.set(uname, target);
-          }
-        }
-      }
-
-      // 4. Secondary/Legacy #BAN handler
-      if (text.includes('#BAN') || text.includes('/ban')) {
-        try {
-          const banMatch = text.match(/#BAN\s+([a-zA-Z0-9_]+)/i) || text.match(/\/ban[_\s]+([a-zA-Z0-9_]+)/i);
-          const banUname = banMatch ? banMatch[1].trim() : '';
-
-          let banIp = '';
-          let banDeviceId = '';
-          let banReason = 'حظر سحابي عبر تيليجرام';
-
-          const jsonMatch = text.match(/\{[\s\S]*\}/);
-          if (jsonMatch) {
-            const parsed = JSON.parse(jsonMatch[0]);
-            if (parsed.username) banIp = parsed.ip;
-            if (parsed.deviceFingerprint || parsed.deviceId) banDeviceId = parsed.deviceFingerprint || parsed.deviceId;
-            if (parsed.reason) banReason = parsed.reason;
-          }
-
-          if (banUname && usersMap.has(banUname)) {
-            const target = usersMap.get(banUname)!;
-            target.status = 'banned';
-            if (!banIp) banIp = target.ip;
-            if (!banDeviceId) banDeviceId = target.deviceId;
-            usersMap.set(banUname, target);
-          }
-
-          if (banIp || banDeviceId || banUname) {
-            bannedSet.push({
-              ip: banIp,
-              deviceId: banDeviceId,
-              username: banUname || undefined,
-              reason: banReason,
-            });
-          }
-        } catch {
-          // Ignore
         }
       }
     }
@@ -1005,7 +954,7 @@ export async function sendAdminLoginAlert(
 ✅ <i>تم التحقق بنجاح من الصلاحيات الأمنية.</i>
   `.trim();
 
-  return await sendTelegramMessage(settings.botToken, settings.adminChatId, text);
+  return await sendTelegramMessage(settings.botToken, settings.adminChatId, text, 'HTML');
 }
 
 export async function sendUserApprovedAlert(
@@ -1029,7 +978,7 @@ export async function sendUserApprovedAlert(
 🎉 <i>تم تغيير الحالة إلى S(active) في الجروب السحابي.</i>
   `.trim();
 
-  return await sendTelegramMessage(settings.botToken, settings.adminChatId, text);
+  return await sendTelegramMessage(settings.botToken, settings.adminChatId, text, 'HTML');
 }
 
 export async function sendUserBannedAlert(
@@ -1051,5 +1000,5 @@ export async function sendUserBannedAlert(
 ⛔ <i>تم تعديل الحالة إلى S(banned) في قاعدة بيانات تيليجرام.</i>
   `.trim();
 
-  return await sendTelegramMessage(settings.botToken, settings.adminChatId, text);
+  return await sendTelegramMessage(settings.botToken, settings.adminChatId, text, 'HTML');
 }

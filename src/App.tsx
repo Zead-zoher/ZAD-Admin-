@@ -32,6 +32,7 @@ import {
   sendUserApprovalToCloud,
   sendUserRejectionToCloud,
   sendUserBanToCloud,
+  updateUserPasswordInTelegramGroup,
   syncBanToCloudDatabaseGroup,
   sendNewAdminRequestToGroup,
   fetchCloudUsersFromTelegram,
@@ -567,6 +568,33 @@ export default function App() {
     setIsUserModalOpen(true);
   };
 
+  const handleUpdateUserPassword = async (user: UserRecord, newPassword: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const res = await updateUserPasswordInTelegramGroup(telegramSettings, user, newPassword);
+      if (res.success) {
+        const updated = users.map((u) => (u.id === user.id ? { ...u, password: newPassword } : u));
+        setUsers(updated);
+        saveStoredUsers(updated);
+
+        addAccessLog({
+          ip: user.ip,
+          location: user.location,
+          device: user.browser,
+          os: user.os,
+          deviceId: user.deviceId,
+          eventType: 'admin_action',
+          details: `تم تعديل كلمة المرور للمستخدم @${user.username} وتحديث السطر P(...) في جروب التليجرام بنجاح`,
+          status: 'info',
+          userRef: user.username,
+        });
+        setLogs(getStoredLogs());
+      }
+      return res;
+    } catch (e: any) {
+      return { success: false, error: e?.message || 'فشل تعديل كلمة المرور' };
+    }
+  };
+
   // Action: 👑 Add/Promote New Admin (#newadmin) to Telegram Group
   const handleSendNewAdmin = async (adminUsername: string, adminPassword: string): Promise<{ success: boolean; error?: string }> => {
     try {
@@ -946,9 +974,14 @@ export default function App() {
       {/* Modals */}
       <UserModal
         isOpen={isUserModalOpen}
-        onClose={() => setIsUserModalOpen(false)}
+        onClose={() => {
+          setIsUserModalOpen(false);
+          setUserToEdit(null);
+        }}
         existingUsers={users}
+        userToEdit={userToEdit}
         onSendNewAdmin={handleSendNewAdmin}
+        onUpdatePassword={handleUpdateUserPassword}
       />
 
       <BanModal
